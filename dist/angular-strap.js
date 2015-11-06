@@ -1,6 +1,6 @@
 /**
  * angular-strap
- * @version v2.3.5 - 2015-10-29
+ * @version v2.3.5 - 2015-11-06
  * @link http://mgcrea.github.io/angular-strap
  * @author Olivier Louvignes <olivier@mg-crea.com> (https://github.com/mgcrea)
  * @license MIT License, http://www.opensource.org/licenses/MIT
@@ -450,15 +450,15 @@
           if (autoPlace) {
             var originalPlacement = placement;
             var viewportPosition = getPosition($tooltip.$viewport);
-            if (originalPlacement.indexOf('bottom') >= 0 && elementPosition.bottom + tipHeight > viewportPosition.bottom) {
-              placement = originalPlacement.replace('bottom', 'top');
-            } else if (originalPlacement.indexOf('top') >= 0 && elementPosition.top - tipHeight < viewportPosition.top) {
+            if (/top/.test(originalPlacement) && elementPosition.bottom + tipHeight > viewportPosition.bottom) {
               placement = originalPlacement.replace('top', 'bottom');
+            } else if (/bottom/.test(originalPlacement) && elementPosition.top - tipHeight < viewportPosition.top) {
+              placement = originalPlacement.replace('bottom', 'top');
             }
-            if ((originalPlacement === 'right' || originalPlacement === 'bottom-left' || originalPlacement === 'top-left') && elementPosition.right + tipWidth > viewportPosition.width) {
-              placement = originalPlacement === 'right' ? 'left' : placement.replace('left', 'right');
-            } else if ((originalPlacement === 'left' || originalPlacement === 'bottom-right' || originalPlacement === 'top-right') && elementPosition.left - tipWidth < viewportPosition.left) {
-              placement = originalPlacement === 'left' ? 'right' : placement.replace('right', 'left');
+            if (/left/.test(originalPlacement) && elementPosition.left - tipWidth < viewportPosition.left) {
+              placement = placement.replace('left', 'right');
+            } else if (/right/.test(originalPlacement) && elementPosition.right + tipWidth > viewportPosition.width) {
+              placement = placement.replace('right', 'left');
             }
             tipElement.removeClass(originalPlacement).addClass(placement);
           }
@@ -611,11 +611,11 @@
           } else if (split[0] === 'left' || split[0] === 'right') {
             switch (split[1]) {
              case 'top':
-              offset.top = position.top - actualHeight;
+              offset.top = position.top - actualHeight + position.height;
               break;
 
              case 'bottom':
-              offset.top = position.top + position.height;
+              offset.top = position.top;
             }
           }
           return offset;
@@ -1602,12 +1602,12 @@
           element[0].addEventListener('blur', select.$selectScrollFix);
         }
         var watchedOptions = parsedOptions.$match[7].replace(/\|.+/, '').trim();
-        scope.$watchCollection(watchedOptions, function(newValue, oldValue) {
+        scope.$watch(watchedOptions, function(newValue, oldValue) {
           parsedOptions.valuesFn(scope, controller).then(function(values) {
             select.update(values);
             controller.$render();
           });
-        });
+        }, true);
         scope.$watch(attr.ngModel, function(newValue, oldValue) {
           select.$updateActiveIndex();
           controller.$render();
@@ -2631,38 +2631,62 @@
           }
           return date;
         };
-        function setMapForFormat(format) {
-          var keys = Object.keys(setFnMap), i;
-          var map = [], sortedMap = [];
-          var clonedFormat = format;
-          for (i = 0; i < keys.length; i++) {
-            if (format.split(keys[i]).length > 1) {
-              var index = clonedFormat.search(keys[i]);
-              format = format.split(keys[i]).join('');
-              if (setFnMap[keys[i]]) {
-                map[index] = setFnMap[keys[i]];
+        function regExpForFormat(format) {
+          var re = buildDateAbstractRegex(format);
+          return buildDateParseRegex(re);
+        }
+        function buildDateAbstractRegex(format) {
+          var escapedFormat = escapeReservedSymbols(format);
+          var escapedLiteralFormat = escapedFormat.replace(/''/g, '\\\'');
+          var literalRegex = /('(?:\\'|.)*?')/;
+          var formatParts = escapedLiteralFormat.split(literalRegex);
+          var dateElements = Object.keys(regExpMap);
+          var dateRegexParts = [];
+          angular.forEach(formatParts, function(part) {
+            if (isFormatStringLiteral(part)) {
+              part = trimLiteralEscapeChars(part);
+            } else {
+              for (var i = 0; i < dateElements.length; i++) {
+                part = part.split(dateElements[i]).join('${' + i + '}');
               }
             }
-          }
-          angular.forEach(map, function(v) {
-            if (v) sortedMap.push(v);
+            dateRegexParts.push(part);
           });
-          return sortedMap;
+          return dateRegexParts.join('');
         }
         function escapeReservedSymbols(text) {
-          return text.replace(/\//g, '[\\/]').replace('/-/g', '[-]').replace(/\./g, '[.]').replace(/\\s/g, '[\\s]');
+          return text.replace(/\\/g, '[\\\\]').replace(/-/g, '[-]').replace(/\./g, '[.]').replace(/\*/g, '[*]').replace(/\+/g, '[+]').replace(/\?/g, '[?]').replace(/\$/g, '[$]').replace(/\^/g, '[^]').replace(/\//g, '[/]').replace(/\\s/g, '[\\s]');
         }
-        function regExpForFormat(format) {
-          var keys = Object.keys(regExpMap), i;
-          var re = format;
-          for (i = 0; i < keys.length; i++) {
-            re = re.split(keys[i]).join('${' + i + '}');
+        function isFormatStringLiteral(text) {
+          return /^'.*'$/.test(text);
+        }
+        function trimLiteralEscapeChars(text) {
+          return text.replace(/^'(.*)'$/, '$1');
+        }
+        function buildDateParseRegex(abstractRegex) {
+          var dateElements = Object.keys(regExpMap);
+          var re = abstractRegex;
+          for (var i = 0; i < dateElements.length; i++) {
+            re = re.split('${' + i + '}').join('(' + regExpMap[dateElements[i]] + ')');
           }
-          for (i = 0; i < keys.length; i++) {
-            re = re.split('${' + i + '}').join('(' + regExpMap[keys[i]] + ')');
-          }
-          format = escapeReservedSymbols(format);
           return new RegExp('^' + re + '$', [ 'i' ]);
+        }
+        function setMapForFormat(format) {
+          var re = buildDateAbstractRegex(format);
+          return buildDateParseValuesMap(re);
+        }
+        function buildDateParseValuesMap(abstractRegex) {
+          var dateElements = Object.keys(regExpMap);
+          var valuesRegex = new RegExp('\\${(\\d+)}', 'g');
+          var valuesMatch, keyIndex, valueKey, valueFunction;
+          var valuesFunctionMap = [];
+          while ((valuesMatch = valuesRegex.exec(abstractRegex)) !== null) {
+            keyIndex = valuesMatch[1];
+            valueKey = dateElements[keyIndex];
+            valueFunction = setFnMap[valueKey];
+            valuesFunctionMap.push(valueFunction);
+          }
+          return valuesFunctionMap;
         }
         $dateParser.init();
         return $dateParser;
@@ -2857,20 +2881,21 @@
       restrict: 'EAC',
       scope: true,
       compile: function(tElement, tAttrs) {
-        var options = {};
         if (!tAttrs.bsDropdown) {
           var nextSibling = tElement[0].nextSibling;
           while (nextSibling && nextSibling.nodeType !== 1) {
             nextSibling = nextSibling.nextSibling;
           }
           if (nextSibling.classList.contains('dropdown-menu')) {
-            options.template = nextSibling.outerHTML;
-            options.templateUrl = undefined;
+            tAttrs.template = nextSibling.outerHTML;
+            tAttrs.templateUrl = undefined;
             nextSibling.parentNode.removeChild(nextSibling);
           }
         }
         return function postLink(scope, element, attr) {
-          options.scope = scope;
+          var options = {
+            scope: scope
+          };
           angular.forEach([ 'template', 'templateUrl', 'controller', 'controllerAs', 'placement', 'container', 'delay', 'trigger', 'keyboard', 'html', 'animation', 'id' ], function(key) {
             if (angular.isDefined(tAttrs[key])) options[key] = tAttrs[key];
           });
@@ -3629,6 +3654,70 @@
       }
     };
   } ]);
+  angular.module('mgcrea.ngStrap.aside', [ 'mgcrea.ngStrap.modal' ]).provider('$aside', function() {
+    var defaults = this.defaults = {
+      animation: 'am-fade-and-slide-right',
+      prefixClass: 'aside',
+      prefixEvent: 'aside',
+      placement: 'right',
+      templateUrl: 'aside/aside.tpl.html',
+      contentTemplate: false,
+      container: false,
+      element: null,
+      backdrop: true,
+      keyboard: true,
+      html: false,
+      show: true
+    };
+    this.$get = [ '$modal', function($modal) {
+      function AsideFactory(config) {
+        var $aside = {};
+        var options = angular.extend({}, defaults, config);
+        $aside = $modal(options);
+        return $aside;
+      }
+      return AsideFactory;
+    } ];
+  }).directive('bsAside', [ '$window', '$sce', '$aside', function($window, $sce, $aside) {
+    var requestAnimationFrame = $window.requestAnimationFrame || $window.setTimeout;
+    return {
+      restrict: 'EAC',
+      scope: true,
+      link: function postLink(scope, element, attr, transclusion) {
+        var options = {
+          scope: scope,
+          element: element,
+          show: false
+        };
+        angular.forEach([ 'template', 'templateUrl', 'controller', 'controllerAs', 'contentTemplate', 'placement', 'backdrop', 'keyboard', 'html', 'container', 'animation' ], function(key) {
+          if (angular.isDefined(attr[key])) options[key] = attr[key];
+        });
+        var falseValueRegExp = /^(false|0|)$/i;
+        angular.forEach([ 'backdrop', 'keyboard', 'html', 'container' ], function(key) {
+          if (angular.isDefined(attr[key]) && falseValueRegExp.test(attr[key])) options[key] = false;
+        });
+        angular.forEach([ 'title', 'content' ], function(key) {
+          attr[key] && attr.$observe(key, function(newValue, oldValue) {
+            scope[key] = $sce.trustAsHtml(newValue);
+          });
+        });
+        attr.bsAside && scope.$watch(attr.bsAside, function(newValue, oldValue) {
+          if (angular.isObject(newValue)) {
+            angular.extend(scope, newValue);
+          } else {
+            scope.content = newValue;
+          }
+        }, true);
+        var aside = $aside(options);
+        element.on(attr.trigger || 'click', aside.toggle);
+        scope.$on('$destroy', function() {
+          if (aside) aside.destroy();
+          options = null;
+          aside = null;
+        });
+      }
+    };
+  } ]);
   angular.module('mgcrea.ngStrap.button', []).provider('$button', function() {
     var defaults = this.defaults = {
       activeClass: 'active',
@@ -3744,70 +3833,6 @@
             controller.$setViewValue(value);
             controller.$render();
           });
-        });
-      }
-    };
-  } ]);
-  angular.module('mgcrea.ngStrap.aside', [ 'mgcrea.ngStrap.modal' ]).provider('$aside', function() {
-    var defaults = this.defaults = {
-      animation: 'am-fade-and-slide-right',
-      prefixClass: 'aside',
-      prefixEvent: 'aside',
-      placement: 'right',
-      templateUrl: 'aside/aside.tpl.html',
-      contentTemplate: false,
-      container: false,
-      element: null,
-      backdrop: true,
-      keyboard: true,
-      html: false,
-      show: true
-    };
-    this.$get = [ '$modal', function($modal) {
-      function AsideFactory(config) {
-        var $aside = {};
-        var options = angular.extend({}, defaults, config);
-        $aside = $modal(options);
-        return $aside;
-      }
-      return AsideFactory;
-    } ];
-  }).directive('bsAside', [ '$window', '$sce', '$aside', function($window, $sce, $aside) {
-    var requestAnimationFrame = $window.requestAnimationFrame || $window.setTimeout;
-    return {
-      restrict: 'EAC',
-      scope: true,
-      link: function postLink(scope, element, attr, transclusion) {
-        var options = {
-          scope: scope,
-          element: element,
-          show: false
-        };
-        angular.forEach([ 'template', 'templateUrl', 'controller', 'controllerAs', 'contentTemplate', 'placement', 'backdrop', 'keyboard', 'html', 'container', 'animation' ], function(key) {
-          if (angular.isDefined(attr[key])) options[key] = attr[key];
-        });
-        var falseValueRegExp = /^(false|0|)$/i;
-        angular.forEach([ 'backdrop', 'keyboard', 'html', 'container' ], function(key) {
-          if (angular.isDefined(attr[key]) && falseValueRegExp.test(attr[key])) options[key] = false;
-        });
-        angular.forEach([ 'title', 'content' ], function(key) {
-          attr[key] && attr.$observe(key, function(newValue, oldValue) {
-            scope[key] = $sce.trustAsHtml(newValue);
-          });
-        });
-        attr.bsAside && scope.$watch(attr.bsAside, function(newValue, oldValue) {
-          if (angular.isObject(newValue)) {
-            angular.extend(scope, newValue);
-          } else {
-            scope.content = newValue;
-          }
-        }, true);
-        var aside = $aside(options);
-        element.on(attr.trigger || 'click', aside.toggle);
-        scope.$on('$destroy', function() {
-          if (aside) aside.destroy();
-          options = null;
-          aside = null;
         });
       }
     };
